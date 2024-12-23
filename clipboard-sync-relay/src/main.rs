@@ -41,7 +41,7 @@ async fn send_handler(
     >,
     mut reciever: tokio::sync::broadcast::Receiver<Bytes>,
 ) {
-    if let Ok(v) = reciever.recv().await {
+    while let Ok(v) = reciever.recv().await {
         let _ = sink.send(Message::Binary(v)).await;
     }
 }
