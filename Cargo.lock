@@ -70,6 +70,7 @@ name = "clipboard-sync-client"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "once_cell",
  "tokio",
  "tokio-tungstenite",
 ]
@@ -264,6 +265,12 @@ checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "once_cell"
+version = "1.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
 
 [[package]]
 name = "pin-project-lite"

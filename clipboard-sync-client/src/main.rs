@@ -7,6 +7,14 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message, Result},
 };
 
+#[derive(Debug)]
+struct Config {
+    fifo_path: String,
+    relay_addr: String,
+}
+
+static CONFIG: once_cell::sync::OnceCell<Config> = once_cell::sync::OnceCell::new();
+
 const BUFFER_SIZE: usize = 1024 * 1024;
 
 type ClipboardState = Arc<Mutex<[u8; BUFFER_SIZE]>>;
@@ -56,16 +64,16 @@ async fn recieve_clipboard(
 }
 
 async fn connect() -> Result<()> {
-    let addr = "127.0.0.1:5200";
-    let connection_url = &format!("ws://{}", addr);
+    let Config {
+        fifo_path,
+        relay_addr,
+    } = CONFIG.get().unwrap();
+    let connection_url = &format!("ws://{}", relay_addr);
 
     let (ws_stream, _) = connect_async(connection_url).await?;
     let (sink, stream) = ws_stream.split();
 
-    let fifo = OpenOptions::new()
-        .read(true)
-        .open("/tmp/clipboard.pipe")
-        .unwrap();
+    let fifo = OpenOptions::new().read(true).open(fifo_path).unwrap();
 
     let current_clipboard = Arc::from(Mutex::from([0u8; BUFFER_SIZE]));
 
@@ -82,6 +90,12 @@ async fn connect() -> Result<()> {
 
 #[tokio::main]
 async fn main() {
+    let config = Config {
+        fifo_path: "/tmp/clipboard.pipe".into(),
+        relay_addr: "127.0.0.1:5200".into(),
+    };
+    CONFIG.set(config).unwrap();
+
     if let Err(e) = connect().await {
         match e {
             Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
