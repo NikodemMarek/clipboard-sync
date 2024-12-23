@@ -23,12 +23,8 @@ async fn recieve_handler(
     mut stream: futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>,
     sender: tokio::sync::broadcast::Sender<Bytes>,
 ) {
-    while let Some(msg) = stream.next().await {
-        let msg = msg.unwrap();
+    while let Some(Ok(msg)) = stream.next().await {
         if let Message::Binary(data) = msg {
-            let text = std::str::from_utf8(&data).unwrap();
-            println!("Clipboard: {}", text);
-
             let _ = sender.send(data);
         }
     }
