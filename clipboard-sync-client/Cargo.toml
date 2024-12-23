@@ -2,3 +2,8 @@
 name = "clipboard-sync-client"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+futures-util = "0.3.31"
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+tokio-tungstenite = "0.26.1"

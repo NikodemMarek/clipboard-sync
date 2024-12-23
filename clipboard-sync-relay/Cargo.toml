@@ -2,3 +2,8 @@
 name = "clipboard-sync-relay"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+futures-util = "0.3.31"
+tokio = { version = "1.42.0", features = ["macros", "rt", "rt-multi-thread", "sync"] }
+tokio-tungstenite = "0.26.1"

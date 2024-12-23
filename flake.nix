@@ -21,15 +21,21 @@
           };
 
           workspaceShell = let
-            alias-run = pkgs.writeShellScriptBin "r" ''cargo run'';
+            alias-run-client = pkgs.writeShellScriptBin "rc" ''cargo run --bin clipboard-sync-client'';
+            alias-run-relay = pkgs.writeShellScriptBin "rr" ''cargo run --bin clipboard-sync-relay'';
+            alias-create-clipboard-pipe = pkgs.writeShellScriptBin "clp" ''
+              mkfifo /tmp/clipboard.pipe
+              wl-paste --watch wl-paste --no-newline > /tmp/clipboard.pipe
+            '';
           in
             rustPkgs.workspaceShell
             {
               packages = [cargo2nix.packages."${system}".cargo2nix];
-              buildInputs = [alias-run];
+              buildInputs = [alias-run-client alias-run-relay alias-create-clipboard-pipe];
               shellHook = ''
                 printf "\e[33m
-                  \e[1mr\e[0m\e[33m  -> run
+                  \e[1mr[rc]\e[0m\e[33m  -> run [r]elay [c]lient
+                  \e[1mclp\e[0m\e[33m  -> create clipboard pipe
                 \e[0m"
               '';
             };

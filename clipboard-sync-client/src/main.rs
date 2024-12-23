@@ -1,37 +1,91 @@
-use std::{
-    fs::OpenOptions,
-    io::{Read, Write},
-    net::TcpStream,
+use std::{fs::OpenOptions, io::Read, sync::Arc};
+
+use futures_util::{lock::Mutex, SinkExt, StreamExt};
+use tokio::spawn;
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{Error, Message, Result},
 };
 
 const BUFFER_SIZE: usize = 1024 * 1024;
 
-fn main() {
-    let mut stream = TcpStream::connect("127.0.0.1:5200").unwrap();
+type ClipboardState = Arc<Mutex<[u8; BUFFER_SIZE]>>;
 
-    // open clipboard pipe
-    let mut fifo = OpenOptions::new()
-        .read(true)
-        .open("./clipboard.pipe")
-        .unwrap();
-
-    let mut prev_buffer = [0u8; BUFFER_SIZE];
+async fn send_clipboard(
+    mut sink: futures_util::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        Message,
+    >,
+    state: ClipboardState,
+    mut fifo: std::fs::File,
+) {
     let mut new_buffer = [0u8; BUFFER_SIZE];
 
     while let Ok(bytes_read @ 1..) = fifo.read(&mut new_buffer) {
-        if new_buffer == prev_buffer {
+        let mut state_value = state.lock().await;
+
+        if new_buffer == *state_value {
             continue;
         }
 
-        prev_buffer = new_buffer;
+        *state_value = new_buffer;
         new_buffer = [0u8; BUFFER_SIZE];
 
-        let data = &prev_buffer[..bytes_read];
-        let text = std::str::from_utf8(data).unwrap();
-        // println!("Clipboard: {}", text);
+        let data = &state_value[..bytes_read];
 
-        stream.write_all(data.clone()).unwrap();
+        let _ = sink.send(Message::Binary(data.to_vec().into())).await;
     }
+}
+async fn recieve_clipboard(
+    mut stream: futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
+    state: Arc<Mutex<[u8; BUFFER_SIZE]>>,
+) {
+    while let Some(msg) = stream.next().await {
+        let msg = msg.unwrap();
+        if let Message::Binary(data) = msg {
+            let text = std::str::from_utf8(&data).unwrap();
+            println!("Clipboard: {}", text);
+        }
+    }
+}
 
-    println!("Done reading.");
+async fn connect() -> Result<()> {
+    let addr = "127.0.0.1:5200";
+    let connection_url = &format!("ws://{}", addr);
+
+    let (ws_stream, _) = connect_async(connection_url).await?;
+    let (sink, stream) = ws_stream.split();
+
+    let fifo = OpenOptions::new()
+        .read(true)
+        .open("/tmp/clipboard.pipe")
+        .unwrap();
+
+    let current_clipboard = Arc::from(Mutex::from([0u8; BUFFER_SIZE]));
+
+    let send = spawn(send_clipboard(sink, current_clipboard.clone(), fifo));
+    let recieve = spawn(recieve_clipboard(stream, current_clipboard));
+
+    tokio::select!(
+        send = send => send.expect("send failed"),
+        recieve = recieve => recieve.expect("recieve failed")
+    );
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(e) = connect().await {
+        match e {
+            Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
+            err => eprintln!("Failed to connect: {}", err),
+        }
+    }
 }
