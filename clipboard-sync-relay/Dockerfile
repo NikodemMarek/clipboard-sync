@@ -1,8 +1,10 @@
-FROM rust:latest
+FROM rust:latest as build-env
 
-WORKDIR /usr/src/clipboard-sync-relay
+WORKDIR /app
 COPY . .
 
-RUN cargo install --path .
+RUN cargo build --release
 
-CMD ["clipboard-sync-relay"]
+FROM gcr.io/distroless/cc-debian12
+COPY --from=build-env /app/target/release/clipboard-sync-relay /
+CMD ["./clipboard-sync-relay"]
