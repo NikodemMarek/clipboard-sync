@@ -69,4 +69,5 @@ dependencies {
 
     implementation(libs.ktor.client.cio.jvm)
     implementation(libs.ktor.client.websockets)
+    implementation(libs.androidx.work.runtime.ktx)
 }
