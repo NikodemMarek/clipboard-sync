@@ -1,7 +1,15 @@
-use std::{fs::OpenOptions, io::Read, sync::Arc};
+use std::{
+    collections::HashMap,
+    fs::{self, OpenOptions},
+    io::Read,
+    sync::Arc,
+};
 
 use futures_util::{lock::Mutex, SinkExt, StreamExt};
-use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
+use rsa::{
+    pkcs8::{DecodePublicKey, EncodePublicKey, LineEnding},
+    Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
+};
 use tokio::spawn;
 use tokio_tungstenite::{
     connect_async,
@@ -13,7 +21,7 @@ struct Config {
     fifo_path: Box<str>,
     relay_addr: Box<str>,
     priv_key: RsaPrivateKey,
-    pub_keys: Box<[RsaPublicKey]>,
+    pub_keys: HashMap<Box<str>, RsaPublicKey>,
 }
 
 static CONFIG: once_cell::sync::OnceCell<Config> = once_cell::sync::OnceCell::new();
@@ -47,13 +55,20 @@ async fn send_clipboard(
         new_buffer = [0u8; BUFFER_SIZE];
 
         let data = &state_value[..bytes_read];
-        let messages = pub_keys
-            .iter()
-            .map(|key| key.encrypt(&mut rand::thread_rng(), Pkcs1v15Encrypt, data));
+        let messages = pub_keys.iter().map(|(id, key)| {
+            (
+                id,
+                key.encrypt(&mut rand::thread_rng(), Pkcs1v15Encrypt, data),
+            )
+        });
 
-        for message in messages {
-            let message = message.unwrap();
-            let _ = sink.send(Message::Binary(message.into())).await;
+        for (id, message) in messages {
+            if let Ok(message) = message {
+                let _ = sink.send(Message::Text(id.as_ref().into())).await;
+                let _ = sink.send(Message::Binary(message.into())).await;
+            } else {
+                eprintln!("Failed to encrypt clipboard for {}", id);
+            }
         }
     }
 }
@@ -70,7 +85,6 @@ async fn recieve_clipboard(
     while let Some(Ok(msg)) = stream.next().await {
         if let Message::Binary(data) = msg {
             if let Ok(data) = priv_key.decrypt(Pkcs1v15Encrypt, &data) {
-                let data = priv_key.decrypt(Pkcs1v15Encrypt, &data).unwrap();
                 let text = std::str::from_utf8(&data).unwrap();
                 println!("Clipboard: {}", text);
             } else {
@@ -80,7 +94,7 @@ async fn recieve_clipboard(
     }
 }
 
-async fn connect() -> Result<()> {
+async fn connect(id: Box<str>) -> Result<()> {
     let Config {
         fifo_path,
         relay_addr,
@@ -88,7 +102,10 @@ async fn connect() -> Result<()> {
     } = CONFIG.get().unwrap();
     let connection_url = &format!("ws://{}", relay_addr);
 
-    let (ws_stream, _) = connect_async(connection_url).await?;
+    let (mut ws_stream, _) = connect_async(connection_url).await?;
+    println!("Connected to the server");
+    ws_stream.send(Message::Text(id.as_ref().into())).await?;
+
     let (sink, stream) = ws_stream.split();
 
     let fifo = OpenOptions::new()
@@ -109,6 +126,18 @@ async fn connect() -> Result<()> {
     Ok(())
 }
 
+fn compute_id(content: &str) -> Box<str> {
+    sha256::digest(content).into()
+}
+
+fn get_id_key_from_file(path: &str) -> (Box<str>, RsaPublicKey) {
+    let key_str = fs::read_to_string(path).expect("failed to read a key from file");
+    let key_str = key_str.trim();
+
+    let key = RsaPublicKey::from_public_key_pem(key_str).expect("failed to get a key from file");
+    (compute_id(key_str), key)
+}
+
 #[tokio::main]
 async fn main() {
     let bits = 2048;
@@ -116,18 +145,22 @@ async fn main() {
 
     let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate a key");
     let pub_key = RsaPublicKey::from(&priv_key);
+    let id = compute_id(&EncodePublicKey::to_public_key_pem(&pub_key, LineEnding::CR).unwrap());
+    println!("ID: {}", id);
 
-    let pub_keys = Box::new([pub_key]);
+    let client_1 = get_id_key_from_file("../secret.key");
+    let pub_keys = HashMap::from([client_1]);
 
     let config = Config {
         fifo_path: "/tmp/clipboard.pipe".into(),
+        // relay_addr: "130.61.88.218:5200".into(),
         relay_addr: "127.0.0.1:5200".into(),
         priv_key,
         pub_keys,
     };
     CONFIG.set(config).unwrap();
 
-    if let Err(e) = connect().await {
+    if let Err(e) = connect(id).await {
         match e {
             Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
             err => eprintln!("Failed to connect: {}", err),

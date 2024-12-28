@@ -1,15 +1,21 @@
+use core::panic;
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{
     accept_async,
-    tungstenite::{Bytes, Error, Message, Result},
+    tungstenite::{
+        protocol::{frame::coding::CloseCode, CloseFrame},
+        Bytes, Error, Message, Result,
+    },
 };
+
+type InternalMessage = (tokio_tungstenite::tungstenite::Utf8Bytes, Bytes);
 
 async fn accept_connection(
     peer: SocketAddr,
     stream: TcpStream,
-    sender: tokio::sync::broadcast::Sender<Bytes>,
+    sender: tokio::sync::broadcast::Sender<InternalMessage>,
 ) {
     if let Err(e) = handle_connection(peer, stream, sender).await {
         match e {
@@ -21,11 +27,17 @@ async fn accept_connection(
 
 async fn recieve_handler(
     mut stream: futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>,
-    sender: tokio::sync::broadcast::Sender<Bytes>,
+    sender: tokio::sync::broadcast::Sender<InternalMessage>,
 ) {
-    while let Some(Ok(msg)) = stream.next().await {
-        if let Message::Binary(data) = msg {
-            let _ = sender.send(data);
+    while let Some(Ok(message)) = stream.next().await {
+        if let Message::Text(id) = message {
+            if let Some(Ok(Message::Binary(data))) = stream.next().await {
+                let _ = sender.send((id, data));
+            } else {
+                println!("Failed to recieve clipboard data");
+            }
+        } else {
+            eprintln!("Did not recieve destination identifier");
         }
     }
 }
@@ -35,29 +47,48 @@ async fn send_handler(
         tokio_tungstenite::WebSocketStream<TcpStream>,
         Message,
     >,
-    mut reciever: tokio::sync::broadcast::Receiver<Bytes>,
+    mut reciever: tokio::sync::broadcast::Receiver<InternalMessage>,
+    id: tokio_tungstenite::tungstenite::Utf8Bytes,
 ) {
-    while let Ok(v) = reciever.recv().await {
-        let _ = sink.send(Message::Binary(v)).await;
+    while let Ok((recv_id, message)) = reciever.recv().await {
+        if id == recv_id {
+            let _ = sink.send(Message::Binary(message)).await;
+        }
     }
 }
 
 async fn handle_connection(
     peer: SocketAddr,
     stream: TcpStream,
-    sender: tokio::sync::broadcast::Sender<Bytes>,
+    sender: tokio::sync::broadcast::Sender<InternalMessage>,
 ) -> Result<()> {
-    let ws_stream = accept_async(stream).await.expect("Failed to accept");
+    let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
+
+    println!("New incoming connection: {}", peer);
+
+    let id = if let Some(Ok(Message::Text(id))) = ws_stream.next().await {
+        id
+    } else {
+        eprintln!("Did not recieve identifier");
+        ws_stream
+            .close(Some(CloseFrame {
+                code: CloseCode::Invalid,
+                reason: "Did not recieve identifier".into(),
+            }))
+            .await?;
+        return Err(Error::ConnectionClosed);
+    };
+
+    println!("New client connected: {}, with id: {}", peer, id);
+
     let (sink, stream) = ws_stream.split();
 
-    println!("New WebSocket connection: {}", peer);
-
     let recieve = tokio::spawn(recieve_handler(stream, sender.clone()));
-    let send = tokio::spawn(send_handler(sink, sender.subscribe()));
+    let send = tokio::spawn(send_handler(sink, sender.subscribe(), id.clone()));
 
     tokio::select!(
-        send = send => send.expect("send failed"),
-        recieve = recieve => recieve.expect("recieve failed")
+        send = send => send.unwrap_or_else(|_| panic!("send failed for {}", id)),
+        recieve = recieve => recieve.unwrap_or_else(|_| panic!("recieve failed for {}", id))
     );
 
     Ok(())
@@ -65,7 +96,7 @@ async fn handle_connection(
 
 #[tokio::main]
 async fn main() {
-    let addr = "127.0.0.1:5200";
+    let addr = "0.0.0.0:5200";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     println!("Listening on: {}", addr);
 
