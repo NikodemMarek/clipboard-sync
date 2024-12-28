@@ -1,13 +1,9 @@
-use std::{
-    collections::HashMap,
-    fs::{self, OpenOptions},
-    io::Read,
-    sync::Arc,
-};
+use core::str;
+use std::{collections::HashMap, fs::OpenOptions, io::Read, sync::Arc};
 
 use futures_util::{lock::Mutex, SinkExt, StreamExt};
 use rsa::{
-    pkcs8::{DecodePublicKey, EncodePublicKey, LineEnding},
+    pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePublicKey, LineEnding},
     Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
 };
 use tokio::spawn;
@@ -126,29 +122,30 @@ async fn connect(id: Box<str>) -> Result<()> {
     Ok(())
 }
 
-fn compute_id(content: &str) -> Box<str> {
-    sha256::digest(content).into()
+fn compute_id(key: &RsaPublicKey) -> Box<str> {
+    key.to_public_key_der()
+        .map(|d| sha256::digest(d.as_bytes()).into())
+        .expect("failed to compute id")
 }
 
 fn get_id_key_from_file(path: &str) -> (Box<str>, RsaPublicKey) {
-    let key_str = fs::read_to_string(path).expect("failed to read a key from file");
-    let key_str = key_str.trim();
-
-    let key = RsaPublicKey::from_public_key_pem(key_str).expect("failed to get a key from file");
-    (compute_id(key_str), key)
+    let key = RsaPublicKey::read_public_key_pem_file(path).expect("failed to get a key from file");
+    (compute_id(&key), key)
 }
 
 #[tokio::main]
 async fn main() {
-    let bits = 2048;
-    let mut rng = rand::thread_rng();
-
-    let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate a key");
+    let priv_key =
+        RsaPrivateKey::read_pkcs8_pem_file("../secret.key").expect("failed to get a key from file");
     let pub_key = RsaPublicKey::from(&priv_key);
-    let id = compute_id(&EncodePublicKey::to_public_key_pem(&pub_key, LineEnding::CR).unwrap());
+    let id = compute_id(&pub_key);
+    println!(
+        "Public key:\n{}",
+        pub_key.to_public_key_pem(LineEnding::LF).unwrap()
+    );
     println!("ID: {}", id);
 
-    let client_1 = get_id_key_from_file("../secret.key");
+    let client_1 = get_id_key_from_file("../client_1.pub");
     let pub_keys = HashMap::from([client_1]);
 
     let config = Config {
