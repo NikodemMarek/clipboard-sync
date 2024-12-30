@@ -22,13 +22,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import androidx.work.WorkManager
 import com.example.clipboardsync.ui.theme.ClipboardSyncTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
@@ -82,24 +87,26 @@ object KeyStoreUtils {
     }
 }
 
-class PeersData(clientsKeys: Array<String> = emptyArray()) {
+class PeersData(clients: List<String> = emptyList()) {
     private val kf = KeyFactory.getInstance("RSA")
     private val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
 
     private val clients = mutableMapOf<String, PublicKey>()
 
     init {
-        clientsKeys.forEach { addClient(it) }
+        clients.forEach { addClient(it) }
     }
 
-    fun addClient(rawKey: String) {
+    fun addClient(rawKey: String): String {
         val pubKey = kf.generatePublic(X509EncodedKeySpec(stringToByteArray(rawKey))) as PublicKey
         val id = digest(pubKey.encoded)
         clients[id] = pubKey
+
+        return id
     }
 
-    fun removeClient(id: String) {
-        clients.remove(id)
+    fun removeClient(id: String): PublicKey? {
+        return clients.remove(id)
     }
 
     val keys: Array<PublicKey>
@@ -110,6 +117,10 @@ class PeersData(clientsKeys: Array<String> = emptyArray()) {
         get() {
             return clients.keys.toTypedArray()
         }
+
+    fun getPublicKey(id: String): PublicKey? {
+        return clients[id]
+    }
 
     private fun encryptMessage(message: String, id: String): ByteArray {
         cipher.init(Cipher.ENCRYPT_MODE, clients[id])
@@ -127,7 +138,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         var keyPair = KeyStoreUtils.getKeyPair()
         val workManager = WorkManager.getInstance(this)
+        val db = MainDatabase.init(this)
         val peersData = PeersData()
+
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+
+                db?.peerDao()?.getAll()?.forEach {
+                    peersData.addClient(it.key)
+                }
+            }
+        }
 
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -157,7 +178,9 @@ class MainActivity : ComponentActivity() {
                             Text(text = "regenerate key")
                         }
 
-                        ClientKeys(peersData = peersData)
+                        if (db != null) {
+                            ClientKeys(peersData = peersData)
+                        }
                     }
                 }
             }
@@ -212,13 +235,23 @@ fun KeyDisplay(key: PublicKey) {
 fun ClientKeys(peersData: PeersData) {
     var newKeyValue by remember { mutableStateOf("") }
 
+    val scope = rememberCoroutineScope()
+    val peerDao = MainDatabase.instance!!.peerDao()
+
     TextField(value = newKeyValue, onValueChange = {
         newKeyValue = it
     })
 
     Button(onClick = {
-        peersData.addClient(pemToKeyString(newKeyValue))
+        val id = peersData.addClient(pemToKeyString(newKeyValue))
         newKeyValue = ""
+
+        val key = peersData.getPublicKey(id)!!
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                peerDao.insert(Peer(key = keyToString(key)))
+            }
+        }
     }) {
         Text(text = "add key")
     }
@@ -227,7 +260,13 @@ fun ClientKeys(peersData: PeersData) {
         Row {
             Text(text = id)
             Button(onClick = {
-                peersData.removeClient(id)
+                val key = peersData.removeClient(id)
+
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        peerDao.delete(Peer(key = keyToString(key!!)))
+                    }
+                }
             }) {
                 Text(text = "remove")
             }

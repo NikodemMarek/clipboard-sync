@@ -37,7 +37,7 @@ class SyncWorker(private val context: Context, params: WorkerParameters): Corout
         val keyPair = KeyStoreUtils.getKeyPair()
         println("keyPair: $keyPair")
 
-        val clientKeys = inputData.getStringArray("clientKeys")!!
+        val clientKeys = inputData.getStringArray("clientKeys")!!.map { it!! }
         val peersData = PeersData(clientKeys)
 
         val clipboardManager = requireNotNull(context.getSystemService(CLIPBOARD_SERVICE)) as ClipboardManager

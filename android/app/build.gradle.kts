@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -70,4 +71,8 @@ dependencies {
     implementation(libs.ktor.client.cio.jvm)
     implementation(libs.ktor.client.websockets)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.lifecycle.runtime.ktx)
 }
