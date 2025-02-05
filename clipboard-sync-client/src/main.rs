@@ -23,8 +23,6 @@ async fn main() {
             .unwrap()
     );
 
-    dbg!(&config);
-
     let id = config.client_id.clone();
     CONFIG.set(config).unwrap();
 

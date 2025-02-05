@@ -16,16 +16,17 @@ pub struct Config {
 }
 
 pub fn get() -> Config {
+    let cli_args = CliArgs::parse();
+    let config_file = cli_args
+        .config
+        .clone()
+        .map(|p| p.into_os_string().to_string_lossy().to_string())
+        .unwrap_or_else(|| "~/.config/clipboard-sync/config.toml".to_string());
+
     let config: FileConfig = config::Config::builder()
         .add_source(DefaultConfig)
-        .add_source(
-            config::File::new(
-                "~/.config/clipboard-sync/config.toml",
-                config::FileFormat::Toml,
-            )
-            .required(false),
-        )
-        .add_source(CliArgs::parse())
+        .add_source(config::File::with_name(&shellexpand::tilde(&config_file)))
+        .add_source(cli_args)
         .build()
         .expect("failed to build config")
         .try_deserialize()
@@ -95,16 +96,17 @@ impl config::Source for FileConfig {
             );
         }
         if let Some(peers_keys) = &self.peers_keys {
-            map.insert(
-                "peers_keys".into(),
-                Value::new(
-                    Some(&"peers_keys".into()),
-                    peers_keys
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect::<Vec<String>>(),
-                ),
-            );
+            let peers_keys = peers_keys
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<String>>();
+
+            if !peers_keys.is_empty() {
+                map.insert(
+                    "peers_keys".into(),
+                    Value::new(Some(&"peers_keys".into()), peers_keys),
+                );
+            }
         }
         if let Some(client_key) = &self.client_key {
             map.insert(
@@ -146,6 +148,9 @@ struct CliArgs {
 
     #[arg(short, long)]
     peers_keys: Vec<PathBuf>,
+
+    #[arg(long)]
+    config: Option<PathBuf>,
 }
 impl config::Source for CliArgs {
     fn clone_into_box(&self) -> Box<dyn config::Source + Send + Sync> {
@@ -163,16 +168,17 @@ impl config::Source for CliArgs {
             );
         }
 
-        map.insert(
-            "peers_keys".into(),
-            Value::new(
-                Some(&"peers_keys".into()),
-                self.peers_keys
-                    .iter()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect::<Vec<String>>(),
-            ),
-        );
+        let peers_keys = self
+            .peers_keys
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect::<Vec<String>>();
+        if !peers_keys.is_empty() {
+            map.insert(
+                "peers_keys".into(),
+                Value::new(Some(&"peers_keys".into()), peers_keys),
+            );
+        }
 
         if let Some(decryption_key_path) = &self.client_key {
             map.insert(
