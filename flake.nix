@@ -50,5 +50,11 @@
             default = packages.clipboard-sync-client;
           };
         }
-      );
+      )
+      // {
+        homeManagerModules = {
+          default = self.homeManagerModules.clipboard-sync-client;
+          clipboard-sync-client = import ./nix/hm-module.nix self;
+        };
+      };
 }
