@@ -30,12 +30,12 @@ in {
             description = "Address of the clipboard-sync-relay to connect to.";
           };
 
-          client-key = lib.mkOption {
+          client_key = lib.mkOption {
             type = lib.types.either lib.types.str lib.types.path;
             default = "";
             description = "Client key path to decrypt the communication with.";
           };
-          peers-keys = lib.mkOption {
+          peers_keys = lib.mkOption {
             type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
             default = [];
             description = "Paths to public keys of the peers to encrypt the communication with.";
