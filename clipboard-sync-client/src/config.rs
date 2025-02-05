@@ -8,7 +8,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub relay: String,
-    pub clipboard_fifo: PathBuf,
 
     pub client_key: RsaPrivateKey,
     pub client_pub_key: RsaPublicKey,
@@ -49,9 +48,6 @@ fn get_id_key_from_file(path: impl Into<PathBuf>) -> (Box<str>, RsaPublicKey) {
 
 fn finalize_config(raw_config: FileConfig) -> Config {
     let relay = raw_config.relay.expect("relay address not provided");
-    let clipboard_fifo = raw_config
-        .clipboard_fifo
-        .expect("clipboard fifo path not provided");
 
     let client_key = rsa::RsaPrivateKey::read_pkcs8_pem_file(
         raw_config.client_key.expect("client key path not provided"),
@@ -70,7 +66,6 @@ fn finalize_config(raw_config: FileConfig) -> Config {
 
     Config {
         relay,
-        clipboard_fifo,
         client_key,
         client_pub_key,
         client_id,
@@ -81,7 +76,6 @@ fn finalize_config(raw_config: FileConfig) -> Config {
 #[derive(Debug, serde::Deserialize, Clone)]
 pub struct FileConfig {
     pub relay: Option<String>,
-    pub clipboard_fifo: Option<PathBuf>,
 
     pub client_key: Option<PathBuf>,
     pub peers_keys: Option<Vec<PathBuf>>,
@@ -98,15 +92,6 @@ impl config::Source for FileConfig {
             map.insert(
                 "relay".into(),
                 Value::new(Some(&"relay".into()), relay.clone()),
-            );
-        }
-        if let Some(clipboard_fifo) = &self.clipboard_fifo {
-            map.insert(
-                "clipboard_fifo".into(),
-                Value::new(
-                    Some(&"clipboard_fifo".into()),
-                    clipboard_fifo.to_string_lossy().to_string(),
-                ),
             );
         }
         if let Some(peers_keys) = &self.peers_keys {
@@ -143,16 +128,10 @@ impl config::Source for DefaultConfig {
 
     fn collect(&self) -> Result<config::Map<String, config::Value>, config::ConfigError> {
         use config::Value;
-        Ok(std::collections::HashMap::from([
-            (
-                "relay".into(),
-                Value::new(Some(&"relay".into()), "130.61.88.218:5200"),
-            ),
-            (
-                "clipboard_fifo".into(),
-                Value::new(Some(&"clipboard_fifo".into()), "/tmp/clipboard.pipe"),
-            ),
-        ]))
+        Ok(std::collections::HashMap::from([(
+            "relay".into(),
+            Value::new(Some(&"relay".into()), "130.61.88.218:5200"),
+        )]))
     }
 }
 

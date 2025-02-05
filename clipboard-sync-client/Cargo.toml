@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+arboard = { version = "3.4.1", features = ["wl-clipboard-rs", "wayland-data-control"] }
 clap = { version = "4.5.23", features = ["derive"] }
 config = "0.15.4"
 futures-util = "0.3.31"

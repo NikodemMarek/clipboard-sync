@@ -23,19 +23,19 @@
           workspaceShell = let
             alias-run-client = pkgs.writeShellScriptBin "rc" ''cargo run --bin clipboard-sync-client'';
             alias-run-relay = pkgs.writeShellScriptBin "rr" ''cargo run --bin clipboard-sync-relay'';
-            alias-create-clipboard-pipe = pkgs.writeShellScriptBin "clp" ''
-              mkfifo /tmp/clipboard.pipe
-              wl-paste --watch wl-paste --no-newline > /tmp/clipboard.pipe
+            alias-generate-client-key = pkgs.writeShellScriptBin "gck" ''
+              openssl genpkey -algorithm RSA -out clipboard-sync-client.key
+              openssl rsa -pubout -in clipboard-sync-client.key -out clipboard-sync-client.pub
             '';
           in
             rustPkgs.workspaceShell
             {
               packages = [cargo2nix.packages."${system}".cargo2nix];
-              buildInputs = [alias-run-client alias-run-relay alias-create-clipboard-pipe];
+              buildInputs = [alias-run-client alias-run-relay alias-generate-client-key];
               shellHook = ''
                 printf "\e[33m
                   \e[1mr[rc]\e[0m\e[33m  -> run [r]elay [c]lient
-                  \e[1mclp\e[0m\e[33m  -> create clipboard pipe
+                  \e[1mgck\e[0m\e[33m  -> generate [g]enerate [c]lient [k]ey
                 \e[0m"
               '';
             };

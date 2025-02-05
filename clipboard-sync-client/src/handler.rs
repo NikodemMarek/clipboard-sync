@@ -1,11 +1,19 @@
-use std::io::Read;
-
 use futures_util::{SinkExt, StreamExt};
 use rsa::Pkcs1v15Encrypt;
 use tokio::spawn;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::{config::Config, ClipboardState, BUFFER_SIZE, CONFIG};
+
+async fn has_state_updated(state: &ClipboardState, new_content: &[u8]) -> bool {
+    let mut state_content = state.lock().await;
+    if new_content != state_content.as_slice() {
+        *state_content = new_content.to_vec();
+        true
+    } else {
+        false
+    }
+}
 
 async fn send_clipboard(
     mut sink: futures_util::stream::SplitSink<
@@ -15,27 +23,34 @@ async fn send_clipboard(
         Message,
     >,
     state: ClipboardState,
-    mut fifo: std::fs::File,
 ) {
     let Config { peers_keys, .. } = CONFIG.get().unwrap();
 
-    let mut new_buffer = [0u8; BUFFER_SIZE];
+    let mut clipboard = arboard::Clipboard::new().unwrap();
 
-    while let Ok(bytes_read @ 1..) = fifo.read(&mut new_buffer) {
-        let mut state_value = state.lock().await;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
-        if new_buffer == *state_value {
+        let clipboard_content = clipboard.get_text();
+        if clipboard_content.is_err() {
+            eprintln!("Failed to get clipboard content");
+            continue;
+        }
+        let clipboard_content = clipboard_content.unwrap();
+        let clipboard_content = clipboard_content.as_bytes();
+
+        if !has_state_updated(&state, clipboard_content).await {
             continue;
         }
 
-        *state_value = new_buffer;
-        new_buffer = [0u8; BUFFER_SIZE];
-
-        let data = &state_value[..bytes_read];
+        println!(
+            "Clipboard: {}",
+            std::str::from_utf8(clipboard_content).unwrap()
+        );
         let messages = peers_keys.iter().map(|(id, key)| {
             (
                 id,
-                key.encrypt(&mut rand::thread_rng(), Pkcs1v15Encrypt, data),
+                key.encrypt(&mut rand::thread_rng(), Pkcs1v15Encrypt, clipboard_content),
             )
         });
 
@@ -59,10 +74,19 @@ async fn recieve_clipboard(
 ) {
     let Config { client_key, .. } = CONFIG.get().unwrap();
 
+    let mut clipboard = arboard::Clipboard::new().unwrap();
+
     while let Some(Ok(msg)) = stream.next().await {
         if let Message::Binary(data) = msg {
             if let Ok(data) = client_key.decrypt(Pkcs1v15Encrypt, &data) {
+                if !has_state_updated(&state, &data).await {
+                    continue;
+                }
+
                 let text = std::str::from_utf8(&data).unwrap();
+                if clipboard.set_text(text).is_err() {
+                    println!("Failed to set recieved clipboard content");
+                }
                 println!("Clipboard: {}", text);
             } else {
                 println!("Failed to decrypt message");
@@ -72,11 +96,7 @@ async fn recieve_clipboard(
 }
 
 pub async fn connect(id: Box<str>) -> tokio_tungstenite::tungstenite::Result<()> {
-    let Config {
-        clipboard_fifo,
-        relay,
-        ..
-    } = CONFIG.get().unwrap();
+    let Config { relay, .. } = CONFIG.get().unwrap();
     let connection_url = &format!("ws://{}", relay);
 
     let (mut ws_stream, _) = tokio_tungstenite::connect_async(connection_url).await?;
@@ -85,15 +105,11 @@ pub async fn connect(id: Box<str>) -> tokio_tungstenite::tungstenite::Result<()>
 
     let (sink, stream) = ws_stream.split();
 
-    let fifo = std::fs::OpenOptions::new()
-        .read(true)
-        .open(clipboard_fifo)
-        .expect("Failed to open clipboard fifo");
+    let current_clipboard = std::sync::Arc::from(futures_util::lock::Mutex::from(
+        Vec::with_capacity(BUFFER_SIZE),
+    ));
 
-    let current_clipboard =
-        std::sync::Arc::from(futures_util::lock::Mutex::from([0u8; BUFFER_SIZE]));
-
-    let send = spawn(send_clipboard(sink, current_clipboard.clone(), fifo));
+    let send = spawn(send_clipboard(sink, current_clipboard.clone()));
     let recieve = spawn(recieve_clipboard(stream, current_clipboard));
 
     tokio::select!(

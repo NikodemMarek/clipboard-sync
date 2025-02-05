@@ -8,7 +8,7 @@ static CONFIG: once_cell::sync::OnceCell<config::Config> = once_cell::sync::Once
 
 const BUFFER_SIZE: usize = 1024 * 1024;
 
-type ClipboardState = std::sync::Arc<futures_util::lock::Mutex<[u8; BUFFER_SIZE]>>;
+type ClipboardState = std::sync::Arc<futures_util::lock::Mutex<Vec<u8>>>;
 
 #[tokio::main]
 async fn main() {
