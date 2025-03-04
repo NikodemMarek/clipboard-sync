@@ -66,9 +66,7 @@ in {
         };
         Install.WantedBy = ["default.target"];
         Service = {
-          ExecStart = lib.getExe (pkgs.writeShellScriptBin "clipboard-sync-client" ''
-            ${lib.getExe cfg.package} --config ${config.xdg.configFile."clipboard-sync/config.toml".source}
-          '');
+          ExecStart = "${lib.getExe cfg.package} --config ${config.xdg.configFile."clipboard-sync/config.toml".source}";
           Restart = "on-failure";
         };
       };
