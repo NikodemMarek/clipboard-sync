@@ -61,8 +61,8 @@ in {
       systemd.user.services.clipboard-sync-client = lib.mkIf cfg.autostart {
         Unit = {
           Description = "clipboard-sync-client";
-          Wants = ["network-online.target"];
-          After = ["network-online.target"];
+          Wants = ["network-online.target" "graphical.target"];
+          After = ["network-online.target" "graphical.target"];
         };
         Install.WantedBy = ["default.target"];
         Service = {
