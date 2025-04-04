@@ -1,6 +1,11 @@
 {
   inputs = {
-    cargo2nix.url = "github:cargo2nix/cargo2nix/release-0.11.0";
+    rust-overlay.url = "github:oxalica/rust-overlay/stable";
+    cargo2nix = {
+      url = "github:cargo2nix/cargo2nix/release-0.11.0";
+      inputs.rust-overlay.follows = "rust-overlay";
+    };
+
     flake-utils.follows = "cargo2nix/flake-utils";
     nixpkgs.follows = "cargo2nix/nixpkgs";
   };
@@ -15,7 +20,7 @@
           };
 
           rustPkgs = pkgs.rustBuilder.makePackageSet {
-            rustChannel = "nightly";
+            rustVersion = "1.81.0";
             extraRustComponents = ["rustfmt" "clippy"];
             packageFun = import ./Cargo.nix;
           };
